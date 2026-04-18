@@ -16,8 +16,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
-#[command(name = "netmon", version = "0.2.0",
-    about = "Network traffic monitor: TUI • log-file • Prometheus exporter")]
+#[command(
+    name = "netmon",
+    version = "0.2.0",
+    about = "Network traffic monitor: TUI • log-file • Prometheus exporter"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -67,8 +70,18 @@ fn main() -> Result<()> {
     let running = Arc::new(AtomicBool::new(true));
     install_signal_handler(running.clone());
 
-    match cli.command.unwrap_or(Cmd::Tui { interval:1000, pid:None, port:None, listen:false }) {
-        Cmd::Tui { interval, pid, port, listen } => {
+    match cli.command.unwrap_or(Cmd::Tui {
+        interval: 1000,
+        pid: None,
+        port: None,
+        listen: false,
+    }) {
+        Cmd::Tui {
+            interval,
+            pid,
+            port,
+            listen,
+        } => {
             tui::run(interval, pid, port, listen)?;
         }
         Cmd::Log { output, interval } => {
@@ -103,7 +116,9 @@ fn install_signal_handler(running: Arc<AtomicBool>) {
             #[cfg(not(unix))]
             {
                 // On non-unix just sleep; Ctrl-C kills process normally
-                loop { std::thread::sleep(std::time::Duration::from_secs(3600)); }
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(3600));
+                }
             }
         })
         .expect("failed to spawn signal handler thread");
