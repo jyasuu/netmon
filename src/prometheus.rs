@@ -303,6 +303,95 @@ pub fn render(snap: &Snapshot, scrapes: u64) -> String {
         g!("netmon_process_info", lbl, 1);
     }
 
+    // ── per-process per-IP connection metrics ──
+    // Build a map: (pid, process_name, remote_ip, local_ip, protocol) → connection_count
+    // This lets Prometheus/Grafana correlate IP addresses with owning PIDs.
+    {
+        // (pid, name, local_ip, remote_ip, proto) → count
+        let mut ip_pid_map: HashMap<(u32, String, String, String, String), usize> = HashMap::new();
+        for c in &snap.connections {
+            if let (Some(pid), Some(pname)) = (c.pid, c.process_name.as_deref()) {
+                let key = (
+                    pid,
+                    pname.to_string(),
+                    c.local_addr.clone(),
+                    c.remote_addr.clone(),
+                    c.protocol.as_str().to_string(),
+                );
+                *ip_pid_map.entry(key).or_insert(0) += 1;
+            }
+        }
+
+        meta!(
+            "netmon_process_ip_connections",
+            "Active connections per process labelled with local and remote IP addresses",
+            "gauge"
+        );
+        let mut entries: Vec<_> = ip_pid_map.iter().collect();
+        entries.sort_by_key(|((pid, name, lip, rip, proto), _)| {
+            (
+                pid,
+                name.as_str(),
+                lip.as_str(),
+                rip.as_str(),
+                proto.as_str(),
+            )
+        });
+        for ((pid, name, local_ip, remote_ip, proto), count) in entries {
+            let lbl = format!(
+                "pid=\"{}\",process=\"{}\",local_ip=\"{}\",remote_ip=\"{}\",protocol=\"{}\"",
+                pid,
+                esc(name),
+                esc(local_ip),
+                esc(remote_ip),
+                esc(proto),
+            );
+            g!("netmon_process_ip_connections", lbl, count);
+        }
+
+        // rx_queue and tx_queue totals per (pid, remote_ip)
+        let mut queue_map: HashMap<(u32, String, String, String), (u64, u64)> = HashMap::new();
+        for c in &snap.connections {
+            if let (Some(pid), Some(pname)) = (c.pid, c.process_name.as_deref()) {
+                let key = (
+                    pid,
+                    pname.to_string(),
+                    c.remote_addr.clone(),
+                    c.protocol.as_str().to_string(),
+                );
+                let entry = queue_map.entry(key).or_insert((0, 0));
+                entry.0 += c.rx_queue;
+                entry.1 += c.tx_queue;
+            }
+        }
+
+        meta!(
+            "netmon_process_ip_rx_queue_bytes",
+            "Kernel receive queue bytes per process and remote IP",
+            "gauge"
+        );
+        meta!(
+            "netmon_process_ip_tx_queue_bytes",
+            "Kernel transmit queue bytes per process and remote IP",
+            "gauge"
+        );
+        let mut qentries: Vec<_> = queue_map.iter().collect();
+        qentries.sort_by_key(|((pid, name, rip, proto), _)| {
+            (pid, name.as_str(), rip.as_str(), proto.as_str())
+        });
+        for ((pid, name, remote_ip, proto), (rx_q, tx_q)) in qentries {
+            let lbl = format!(
+                "pid=\"{}\",process=\"{}\",remote_ip=\"{}\",protocol=\"{}\"",
+                pid,
+                esc(name),
+                esc(remote_ip),
+                esc(proto),
+            );
+            g!("netmon_process_ip_rx_queue_bytes", &lbl, rx_q);
+            g!("netmon_process_ip_tx_queue_bytes", &lbl, tx_q);
+        }
+    }
+
     o
 }
 
@@ -355,7 +444,7 @@ th{{background:#161b22;color:#58a6ff}}</style></head><body>
 <tr><td>netmon_process_rx/tx_bytes_per_second</td><td>Per-process traffic rate</td></tr>
 <tr><td>netmon_process_cpu_percent</td><td>Process CPU usage</td></tr>
 <tr><td>netmon_process_memory_bytes</td><td>Process RSS memory</td></tr>
-<tr><td>netmon_process_info</td><td>Process info with full cmdline label</td></tr>
+<tr><td>netmon_process_info</td><td>Process info with full cmdline label</td></tr>\n<tr><td>netmon_process_ip_connections</td><td>Connection count per PID labelled with local_ip, remote_ip, protocol</td></tr>\n<tr><td>netmon_process_ip_rx/tx_queue_bytes</td><td>Kernel socket queue depth per PID and remote IP</td></tr>
 </table>
 </body></html>"#
     )
